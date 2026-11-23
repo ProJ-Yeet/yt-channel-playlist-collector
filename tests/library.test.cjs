@@ -9,7 +9,7 @@ const start = source.indexOf('  const LIB_SITE =');
 const end = source.indexOf('  function libToast(', start);
 const section = source.slice(start, end);
 
-function harness({ videos = {}, buckets = {}, failAddTo = null } = {}) {
+function harness({ videos = {}, buckets = {}, failAddTo = null, extra = {} } = {}) {
   const calls = [];
   const db = { meta: { buckets: JSON.parse(JSON.stringify(buckets)) }, chunks: Array(32).fill(null).map(() => ({})) };
   const ctx = vm.createContext({
@@ -35,6 +35,7 @@ function harness({ videos = {}, buckets = {}, failAddTo = null } = {}) {
     window: { addEventListener() {}, removeEventListener() {}, postMessage() {} },
     location: { origin: 'https://www.youtube.com' },
     setTimeout, clearTimeout, Date, Map, Set, Promise, Object, Array, String, Number, Math, JSON,
+    ...extra,
   });
   vm.runInContext(section, ctx);
   // Replace the bridge with an in-memory database.
@@ -135,4 +136,61 @@ test('songs rated on the website are moved in batches', async () => {
   assert.deepEqual(nonJournal.slice(1).sort(), [['remove', 'PL_S1', 'e2eeeeeeeee'], ['remove', 'PL_S3', 'e1eeeeeeeee']]);
   assert.equal(h.rec('e1eeeeeeeee').p, 'PL_RELAX');
   assert.equal(h.rec('e3eeeeeeeee').p, 'PL_S3');
+});
+
+// Dead songs: a suspect is only removed when a logged-out player call says it
+// is really gone; then it leaves the playlist and stays on record with z.
+function deadHarness(players) {
+  const vid = (t) => ({ t, a: 'x', d: 200, c: 'song', s: 4, f: '', p: 'PL_S3' });
+  const videos = { aaaaaaaaaa1: vid('deleted one'), aaaaaaaaaa2: vid('plays fine'), aaaaaaaaaa3: vid('blocked here'), aaaaaaaaaa4: vid('age gate'), aaaaaaaaaa5: vid('healthy') };
+  const entries = Object.keys(videos).map((id) => ({ id, dead: id === 'aaaaaaaaaa1' }));
+  const hidden = new Set(entries.filter((e) => ['aaaaaaaaaa2', 'aaaaaaaaaa3', 'aaaaaaaaaa4'].includes(e.id)));
+  const read = Object.assign(entries.slice(), { hiddenEntries: hidden });
+  return harness({
+    buckets: { '4-song': [{ id: 'PL_S3', name: '4★ Song 3', n: 5 }] },
+    videos,
+    extra: {
+      ORIGIN: 'https://www.youtube.com',
+      ytcfgGet: () => 'x',
+      textOf: (t) => (t && t.simpleText) || '',
+      lsSet() {}, parsePlaylistId: (p) => p, saveCfg() {},
+      deadKind: (v) => (v.dead ? 'deleted' : null),
+      readWithUnavailable: async () => read,
+      fetch: async (url, opt) => {
+        const id = JSON.parse(opt.body).videoId;
+        return { ok: true, json: async () => ({ playabilityStatus: players[id] || { status: 'OK' } }) };
+      },
+    },
+  });
+}
+
+test('only confirmed dead songs are taken out and kept on record', async () => {
+  const h = deadHarness({
+    aaaaaaaaaa1: { status: 'ERROR', reason: 'This video has been removed by the uploader' },
+    aaaaaaaaaa2: { status: 'UNPLAYABLE', reason: 'The page needs to be reloaded.' },
+    aaaaaaaaaa3: { status: 'UNPLAYABLE', reason: 'The uploader has not made this video available in your country' },
+    aaaaaaaaaa4: { status: 'LOGIN_REQUIRED', reason: 'Sign in to confirm your age' },
+  });
+  await h.run('libLoad(true)');
+  const dead = await h.run(`libCheckPlaylist({ id: 'PL_S3', name: '4★ Song 3' })`);
+  assert.deepEqual(JSON.parse(JSON.stringify(dead.map((d) => d.id).sort())), ['aaaaaaaaaa1', 'aaaaaaaaaa3']);
+  const removed = h.calls.filter((c) => c[0] === 'remove');
+  assert.deepEqual(removed.map((c) => c[2].split(',').sort().join(',')), ['aaaaaaaaaa1,aaaaaaaaaa3']);
+  assert.ok(h.calls.some((c) => c[0] === 'journal' && c[2] === 'dead'));
+  assert.match(h.rec('aaaaaaaaaa1').z.why, /removed by the uploader/);
+  assert.equal(h.rec('aaaaaaaaaa3').z.pl, 'PL_S3');
+  assert.equal(h.rec('aaaaaaaaaa3').z.pn, '4★ Song 3');
+  for (const id of ['aaaaaaaaaa2', 'aaaaaaaaaa4', 'aaaaaaaaaa5']) assert.equal(h.rec(id).z, undefined, id);
+  assert.equal(h.db.meta.buckets['4-song'][0].n, 3);
+});
+
+test('dead songs are not moved by the sync, and rating one again revives it', async () => {
+  const h = harness({
+    buckets: { '4-song': [{ id: 'PL_S3', name: '4★ Song 3', n: 1 }], '5-song': [{ id: 'PL_BEST', name: '5★ Song', n: 1 }] },
+    videos: { fffffffffff: { t: 'gone', d: 100, c: 'song', s: 5, f: '', p: 'PL_S3', z: { at: 1, why: 'deleted' } } },
+  });
+  assert.equal(await h.run('libSyncPending()'), 0);
+  await h.run(`libFile('fffffffffff', { s: 5 }, {})`);
+  assert.equal(h.rec('fffffffffff').z, undefined);
+  assert.equal(h.rec('fffffffffff').p, 'PL_BEST');
 });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Channel Playlist Collector
 // @namespace    ycfp
-// @version      3.59.2
+// @version      3.60.0
 // @description  Adds a "Collect All" button on YouTube channels: gathers every upload + the "- Topic" channel's releases, skips videos already in your configured playlists, dedupes by title+duration, and adds the rest into an EXISTING playlist of your choice (or a new one). Also lets you copy any playlist into another.
 // @match        https://www.youtube.com/*
 // @match        https://*.youtube.com/*
@@ -1334,6 +1334,7 @@
       lib.videos = new Map();
       for (const m of r.chunks || []) for (const [id, v] of Object.entries(m || {})) lib.videos.set(id, v);
       lib.loadedAt = Date.now();
+      libRememberPlaylists(Object.values(lib.meta.buckets).flat().map((p) => p && p.id));
       return lib;
     }).finally(() => { lib.loading = null; });
     return lib.loading;
@@ -1386,6 +1387,7 @@
         const take = remaining.splice(0, PLAYLIST_CAP);
         const id = await createPlaylist(name, take, cfg, log, guard);
         chain.push({ id, name, n: take.length });
+        libRememberPlaylists([id]);
         for (const v of take) placed.set(v, id);
         await libSaveMeta(); // the new playlist must be on record even if a later step fails
         log(`Library: created playlist "${name}".`);
@@ -1405,7 +1407,7 @@
     return placed;
   }
 
-  async function libRemoveMany(pid, ids, to = null) {
+  async function libRemoveMany(pid, ids, to = null, src = 'move') {
     const cfg = loadCfg();
     for (let i = 0; i < ids.length; i += cfg.batchSize) {
       const part = ids.slice(i, i + cfg.batchSize);
@@ -1416,9 +1418,10 @@
       if (res.status && res.status !== 'STATUS_SUCCEEDED') throw new Error(res.status);
       archivePatch(pid, '', [], part);
       libBumpCount(pid, -part.length);
-      journalRemovals(part.map((id) => ({
-        id, title: (lib.videos.get(id) || {}).t || '', playlistId: pid, playlistTitle: libPlaylistName(pid),
-      })), 'move', to);
+      journalRemovals(part.map((id) => {
+        const r = lib.videos.get(id) || {};
+        return { id, title: r.t || '', channel: r.a || '', seconds: r.d || 0, playlistId: pid, playlistTitle: libPlaylistName(pid) };
+      }), src, to);
       await sleep(cfg.batchDelayMs);
     }
     invalidateExclCache();
@@ -1434,6 +1437,120 @@
     };
   }
 
+  // Library playlists hold songs you already have, so collects must skip
+  // them and the playlist pickers should tick them by default.
+  function libRememberPlaylists(ids) {
+    const cfg = loadCfg();
+    let changed = false;
+    for (const key of ['excludePlaylists', 'defaultPlaylists']) {
+      if (!Array.isArray(cfg[key])) continue;
+      const have = new Set(cfg[key].map(parsePlaylistId).filter(Boolean));
+      for (const id of ids) if (id && !have.has(id)) { cfg[key].push(id); have.add(id); changed = true; }
+    }
+    if (changed) { saveCfg(cfg); invalidateExclCache(); }
+  }
+
+  // --- dead songs ------------------------------------------------------
+  // A library song that dies (deleted, private, blocked in your country)
+  // is taken out of its playlist but stays in the library with
+  // z = { at, why, pl, pn }, so the website can list it and it can be
+  // replaced later. Before anything is removed, the video is asked for the
+  // way a logged-out visitor from your country would see it: only a clear
+  // "gone" answer counts. Anything unclear (age gate, bot check, "the page
+  // needs to be reloaded", network trouble) counts as alive.
+  async function libDeadReason(id) {
+    let p;
+    try {
+      const key = ytcfgGet('INNERTUBE_API_KEY');
+      const context = ytcfgGet('INNERTUBE_CONTEXT');
+      const r = await fetch(`${ORIGIN}/youtubei/v1/player?key=${key}&prettyPrint=false`, {
+        method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context, videoId: id }),
+      });
+      if (!r.ok) return null;
+      p = await r.json();
+    } catch (e) { return null; }
+    const ps = (p && p.playabilityStatus) || {};
+    const st = ps.status;
+    const why = [ps.reason, textOf(ps.errorScreen && ps.errorScreen.playerErrorMessageRenderer
+      && ps.errorScreen.playerErrorMessageRenderer.subreason)].filter(Boolean).join(' — ');
+    if (!st || st === 'OK' || /reload/i.test(why)) return null;
+    if (st === 'ERROR') return why || 'deleted';
+    if (st === 'LOGIN_REQUIRED') return /private/i.test(why) ? why : null; // age gate / bot check = alive
+    if (st === 'UNPLAYABLE') {
+      return /country|region|premium|not available|unavailable|removed|terminated|copyright|blocked/i.test(why) ? why : null;
+    }
+    return null;
+  }
+
+  // Record dead songs. items: [{ id, why, pl }]. Returns the ids marked.
+  async function libMarkDead(items) {
+    const ids = [];
+    for (const { id, why, pl } of items) {
+      const r = lib.videos && lib.videos.get(id);
+      if (!r || r.z) continue;
+      r.z = { at: Date.now(), why: String(why || 'unavailable').slice(0, 200), pl: pl || r.p || '', pn: libPlaylistName(pl || r.p || '') || '' };
+      r.u = Date.now();
+      ids.push(id);
+    }
+    if (ids.length) { await libPutVideos(ids); await libSaveMeta(); }
+    return ids;
+  }
+
+  // Read one library playlist (unavailable videos shown), confirm which of
+  // its songs are really dead, take those out and record them.
+  async function libCheckPlaylist(pl, log = () => {}, guard = null) {
+    const vids = await readWithUnavailable({ id: pl.id, title: pl.name }, log, guard || (() => {}), true);
+    if (vids.partial) { log(`⚠ ${pl.name}: YouTube did not hand over the whole playlist — skipped this time.`); return []; }
+    const suspects = vids.filter((v) => (deadKind(v) || vids.hiddenEntries.has(v))
+      && lib.videos.has(v.id) && !lib.videos.get(v.id).z);
+    const dead = [];
+    for (const v of suspects) {
+      if (guard) guard();
+      const why = await libDeadReason(v.id);
+      if (why) dead.push({ id: v.id, why, pl: pl.id });
+      else log(`${pl.name}: "${lib.videos.get(v.id).t || v.id}" looked unavailable but still plays — left alone.`);
+      await sleep(400);
+    }
+    if (!dead.length) return [];
+    const ids = [...new Set(dead.map((d) => d.id))];
+    await libRemoveMany(pl.id, ids, null, 'dead');
+    await libMarkDead(dead);
+    for (const d of dead) log(`🪦 ${pl.name}: "${lib.videos.get(d.id).t || d.id}" — ${d.why}. Removed and recorded.`);
+    return dead;
+  }
+
+  // One playlist per auto-sync round, each at most every 3 days, so the
+  // whole library is looked over every few days without a burst of reads.
+  const LIB_HEALTH_KEY = 'ycfp-lib-health';
+  const LIB_HEALTH_EVERY = 3 * 24 * 3600 * 1000;
+  async function libHealthTick() {
+    await libLoad();
+    let seen = {};
+    try { seen = JSON.parse(localStorage.getItem(LIB_HEALTH_KEY) || '{}') || {}; } catch (e) { /* start over */ }
+    const due = Object.values(lib.meta.buckets || {}).flat()
+      .filter((p) => p && p.id && Date.now() - (seen[p.id] || 0) > LIB_HEALTH_EVERY)
+      .sort((a, b) => (seen[a.id] || 0) - (seen[b.id] || 0))[0];
+    if (!due) return [];
+    const dead = await libCheckPlaylist(due);
+    seen[due.id] = Date.now();
+    lsSet(LIB_HEALTH_KEY, JSON.stringify(seen));
+    return dead;
+  }
+
+  // Other tools (⊘ Unavailable, 🪦 cleanup) removed dead entries: record
+  // the library songs among them that were taken out of their own playlist.
+  function libNoteRemovedDead(entries) {
+    if (!entries.length) return;
+    (async () => {
+      await libLoad(true);
+      const items = entries.filter((e) => { const r = lib.videos.get(e.id); return r && !r.z && r.p === e.playlistId; })
+        .map((e) => ({ id: e.id, why: e.kind || 'unavailable', pl: e.playlistId }));
+      for (const it of items) libBumpCount(it.pl, -1);
+      await libMarkDead(items); // also saves the counts
+    })().catch((e) => console.warn('[YCFP] library: could not record dead songs', e));
+  }
+
   // Rate one video (from the strip): save the rating and move the video
   // into its combination's playlist. ctx = { listId, setVideoId, canEdit }:
   // like the old move buttons, it also leaves the playlist you are in
@@ -1443,6 +1560,7 @@
     let rec = lib.videos.get(videoId);
     if (!rec) rec = { ...(await libVideoDetails(videoId)), c: 'song', s: 3, f: '', x: Date.now() };
     const next = { ...rec, ...patch };
+    delete next.z; // rated again, so it plays: no longer dead
     next.f = libAutoFlairs(next.f, next.d);
     const key = libBucketKey(next);
     const plMap = libPlToBucket();
@@ -1477,6 +1595,7 @@
     const plMap = libPlToBucket();
     const groups = new Map();
     for (const [id, v] of lib.videos) {
+      if (v.z) continue; // dead: kept on record only
       const key = libBucketKey(v);
       if (v.p && plMap.get(v.p) === key) continue;
       if (!groups.has(key)) groups.set(key, []);
@@ -1537,6 +1656,12 @@
       if (!ping.signedIn) return;
       const n = await libSyncPending(() => {}, null, 300);
       if (n) libToast(`🗂 Music library: moved ${n} song${n === 1 ? '' : 's'} into their rating's playlist.`);
+      const dead = await libHealthTick();
+      if (dead.length) {
+        const names = dead.slice(0, 3).map((d) => `"${(lib.videos.get(d.id) || {}).t || d.id}"`).join(', ');
+        libToast(`🪦 Music library: ${dead.length} song${dead.length === 1 ? '' : 's'} died (${names}${dead.length > 3 ? ', …' : ''}). `
+          + 'Taken out of the playlist and kept on the website\'s Dead videos list.');
+      }
     } catch (e) {
       console.warn('[YCFP] library auto-sync:', e.message || e);
     }
@@ -1636,9 +1761,14 @@
     try { await libLoad(true); } catch (e) { status.textContent = `⚠ Could not read the library: ${e.message || e}`; return; }
     const plMap = libPlToBucket();
     let pending = 0;
-    for (const v of lib.videos.values()) if (!v.p || plMap.get(v.p) !== libBucketKey(v)) pending++;
+    let deadN = 0;
+    for (const v of lib.videos.values()) {
+      if (v.z) { deadN++; continue; }
+      if (!v.p || plMap.get(v.p) !== libBucketKey(v)) pending++;
+    }
     status.replaceChildren(
-      el('div', {}, `${lib.videos.size.toLocaleString()} songs in the library · ${pending.toLocaleString()} waiting to move to their rating's playlist.`),
+      el('div', {}, `${(lib.videos.size - deadN).toLocaleString()} songs in the library · ${pending.toLocaleString()} waiting to move to their rating's playlist`
+        + ` · ${deadN.toLocaleString()} dead on record (website → Dead videos).`),
       el('div', {}, ping.signedIn
         ? 'Signed in: ratings you set here are saved to the website.'
         : '⚠ Not signed in yet: open the website below, sign in with Google once, then reload this page.'),
@@ -1657,11 +1787,29 @@
     const importBtn = el('button', { class: 'ycfp-btn ycfp-secondary' }, '⇩ Import my playlists…');
     importBtn.disabled = !ping.signedIn;
     importBtn.addEventListener('click', () => { importBtn.disabled = true; libImport(ui).catch((e) => ui.log(`⚠ ${e.message || e}`)); });
+    const deadBtn = el('button', { class: 'ycfp-btn ycfp-secondary', title: 'Reads every library playlist with unavailable videos shown, confirms each suspect as a logged-out visitor, then takes the dead ones out and records them' }, '🪦 Check all for dead songs');
+    deadBtn.disabled = !ping.signedIn;
+    deadBtn.addEventListener('click', async () => {
+      deadBtn.disabled = true;
+      let total = 0;
+      try {
+        const seen = (() => { try { return JSON.parse(localStorage.getItem(LIB_HEALTH_KEY) || '{}') || {}; } catch (e) { return {}; } })();
+        for (const pl of Object.values(lib.meta.buckets || {}).flat()) {
+          ui.guard();
+          ui.log(`Checking ${pl.name}…`);
+          total += (await libCheckPlaylist(pl, ui.log, ui.guard)).length;
+          seen[pl.id] = Date.now();
+          lsSet(LIB_HEALTH_KEY, JSON.stringify(seen));
+        }
+        ui.log(`✓ Done: ${total} dead song${total === 1 ? '' : 's'} found. They are on the website's Dead videos list.`);
+      } catch (e) { ui.log(`⚠ ${e.message || e}`); }
+      deadBtn.disabled = false;
+    });
     ui.body.append(
       el('div', { class: 'ycfp-row' }, el('a', { href: LIB_SITE, target: '_blank' }, 'Open the Music Library website ↗')),
-      el('label', { class: 'ycfp-check' }, autoBox, ' Move songs rated on the website automatically while YouTube is open'),
+      el('label', { class: 'ycfp-check' }, autoBox, ' Move songs rated on the website automatically while YouTube is open (and look over one playlist for dead songs each time)'),
       el('label', { class: 'ycfp-check' }, oldBox, ' Also show the old quick-move buttons next to the rating strip'),
-      el('div', { class: 'ycfp-row' }, syncBtn, importBtn),
+      el('div', { class: 'ycfp-row' }, syncBtn, deadBtn, importBtn),
     );
   }
 
@@ -1676,9 +1824,17 @@
       byTitle.get(k).push(p);
     }
     const found = [];
+    // Playlists the library already knows (by id, so renaming them is fine),
+    // then the original names for a first import.
+    await libLoad(true);
+    for (const [key, chain] of Object.entries(lib.meta.buckets || {})) {
+      const [s, c, f = ''] = key.split('-');
+      for (const p of chain || []) if (p && p.id) found.push({ title: p.name, id: p.id, s: Number(s), c, f, key });
+    }
+    const known = new Set(found.map((x) => x.id));
     for (const [title, s, c, f] of LIB_IMPORT_MAP) {
-      const hits = byTitle.get(title.toLowerCase()) || [];
-      if (!hits.length) { log(`· "${title}" not found, skipped.`); continue; }
+      const hits = (byTitle.get(title.toLowerCase()) || []).filter((p) => !known.has(p.id));
+      if (!hits.length) { if (!found.length) log(`· "${title}" not found, skipped.`); continue; }
       if (hits.length > 1) log(`· ${hits.length} playlists are called "${title}"; using the first.`);
       found.push({ title, id: hits[0].id, s, c, f, key: libBucketKey({ s, c, f }) });
     }
@@ -4791,6 +4947,7 @@
       journalRemovals(journal, src, to);
       archivePatch(pl, list[0].playlistTitle || '', [], okList.map((e) => e.id));
       for (const e of journal) allRemoved.push(e);
+      if (src === 'dead' || src === 'unavail') libNoteRemovedDead(okList);
     }
     invalidateExclCache();
     return { removed, failed: allFailed, removedCopies: allRemoved };

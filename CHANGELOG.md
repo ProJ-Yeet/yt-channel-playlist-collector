@@ -2,6 +2,10 @@
 
 Version-by-version notes for the YouTube Channel Playlist Collector. The overview is in [README.md](README.md).
 
+## v3.60.0
+
+Dead songs in the music library. While YouTube is open, one library playlist is looked over every ~10 minutes (each at most every 3 days), with YouTube's hidden unavailable videos shown. A suspect is only treated as dead when a logged-out player check says so (deleted, private, blocked in your country); age gates, bot checks and "needs reload" count as alive. Dead songs are taken out of the playlist (📜 History, 🪦 Dead-video cleanup) and kept in the library with the date, reason and playlist, so the website can list them and they can be replaced later. ⊘ Unavailable and 🪦 cleanup record library songs the same way. 🗂 Library has a "Check all for dead songs" button. Library playlists are added to the collect exclusions and the default playlist picks automatically, and re-importing finds the library's playlists by id, so renaming them is fine.
+
 ## v3.59.2
 
 When YouTube throttles requests (its "automated queries" page, HTTP 403), long runs wait 20 / 40 / 60 s and retry instead of stopping at the first refusal.
