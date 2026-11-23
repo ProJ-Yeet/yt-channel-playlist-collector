@@ -1310,7 +1310,8 @@
   function libLoad(force = false) {
     if (!force && lib.videos && Date.now() - lib.loadedAt < 5 * 60 * 1000) return Promise.resolve(lib);
     if (lib.loading) return lib.loading;
-    lib.loading = libBridge('getAll', {}, 60000).then((r) => {
+    // A quick ping first, so a missing bridge fails in seconds, not a minute.
+    lib.loading = libBridge('ping', {}, 5000).then(() => libBridge('getAll', {}, 60000)).then((r) => {
       lib.meta = r.meta || {};
       lib.meta.buckets = lib.meta.buckets || {};
       lib.videos = new Map();
