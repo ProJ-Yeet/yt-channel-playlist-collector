@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Channel Playlist Collector
 // @namespace    ycfp
-// @version      3.59.1
+// @version      3.59.2
 // @description  Adds a "Collect All" button on YouTube channels: gathers every upload + the "- Topic" channel's releases, skips videos already in your configured playlists, dedupes by title+duration, and adds the rest into an EXISTING playlist of your choice (or a new one). Also lets you copy any playlist into another.
 // @match        https://www.youtube.com/*
 // @match        https://*.youtube.com/*
@@ -794,10 +794,19 @@
       }
       // Dump YouTube's error body for diagnosis (e.g. which action a 400 hated).
       const errBody = await res.text().catch(() => '');
+      // Google's "Sorry… automated queries" page: a throttle on this
+      // connection that refuses some requests. Wait it out, then retry.
+      const throttled = res.status === 403 && /automated queries|<html/i.test(errBody);
+      if (throttled && attempt < 3) {
+        const wait = 20000 * (attempt + 1);
+        console.warn(`[YCFP] ${path} → YouTube is throttling requests; waiting ${wait / 1000}s (retry ${attempt + 1}/3)…`);
+        await sleep(wait);
+        return api(path, body, attempt + 1);
+      }
       console.warn(`[YCFP] ${path} → HTTP ${res.status}`, errBody.slice(0, 800), body);
       let reason = '';
       try { reason = JSON.parse(errBody).error?.message || ''; } catch (e) { /* not a JSON error */ }
-      throw new Error(`${path} → HTTP ${res.status}${reason ? `: ${String(reason).slice(0, 500)}` : ''}${res.status === 429 ? ' (rate limited — wait a while and re-run)' : ''}`);
+      throw new Error(`${path} → HTTP ${res.status}${reason ? `: ${String(reason).slice(0, 500)}` : ''}${res.status === 429 || throttled ? ' (YouTube is rate-limiting this connection — wait 30–60 minutes and re-run)' : ''}`);
     }
     if (json.error) throw new Error(`${path} → ${json.error.message || json.error.status}`);
     return json;

@@ -2,6 +2,10 @@
 
 Version-by-version notes for the YouTube Channel Playlist Collector. The overview is in [README.md](README.md).
 
+## v3.59.2
+
+When YouTube throttles requests (its "automated queries" page, HTTP 403), long runs wait 20 / 40 / 60 s and retry instead of stopping at the first refusal.
+
 ## v3.59.1
 
 The Hololive category now means any VTuber's songs and covers (Nijisanji, VSPO, VShojo, Phase Connect, indies, ...), and the import recognises them by name.
