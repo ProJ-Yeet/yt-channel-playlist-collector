@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YCFP Library Bridge
 // @namespace    ycfp
-// @version      1.0.0
+// @version      1.0.1
 // @description  Companion for the YouTube Channel Playlist Collector: reads and writes the Music Library database (Firestore) for it. Picks up your sign-in from the Music Library website, so ratings you set on YouTube show up there in real time.
 // @match        https://www.youtube.com/*
 // @match        https://proj-yeet.github.io/yt-music-library/*
@@ -33,7 +33,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const API_KEY = 'AIzaSyABlyOUW567MA3tGLzuHnQFYvDRXBUkVn0';
   const PROJECT = 'yt-music-library-794e4';
   const DOCS = `projects/${PROJECT}/databases/(default)/documents`;
@@ -156,11 +156,25 @@
   const chunkId = (i) => 'c' + String(i).padStart(2, '0');
   const VALID_DOC = /^(meta|c(0\d|1\d|2\d|3[01]))$/;
 
+  // Firestore refuses a commit whose request is too big, so writes go in
+  // batches of at most ~2 MB of JSON (a whole library is ~10 MB) and 400 writes.
   async function commit(writes) {
     const t = await token();
-    for (let i = 0; i < writes.length; i += 400) {
-      await http('POST', `${BASE}:commit`, { writes: writes.slice(i, i + 400) }, t);
+    let batch = [];
+    let size = 0;
+    const flush = async () => {
+      if (!batch.length) return;
+      await http('POST', `${BASE}:commit`, { writes: batch }, t);
+      batch = [];
+      size = 0;
+    };
+    for (const w of writes) {
+      const s = JSON.stringify(w).length;
+      if (batch.length && (size + s > 2e6 || batch.length >= 400)) await flush();
+      batch.push(w);
+      size += s;
     }
+    await flush();
   }
 
   // ---------------------------------------------------------------------
@@ -172,7 +186,7 @@
       return { version: VERSION, signedIn: !!(auth && auth.refreshToken), uid: auth ? auth.uid : null };
     },
 
-    // Whole library: { meta, chunks: [map, …] } — public read, no sign-in.
+    // Whole library: { meta, chunks: [map, â€¦] } â€” public read, no sign-in.
     async getAll() {
       const names = ['meta', ...Array.from({ length: CHUNKS }, (_, i) => chunkId(i))].map(docName);
       const res = await http('POST', `${BASE}:batchGet?key=${API_KEY}`, { documents: names });
@@ -187,7 +201,7 @@
       return out;
     },
 
-    // items: [{ chunk: 'c07', id, rec }] — replaces just those videos' records.
+    // items: [{ chunk: 'c07', id, rec }] â€” replaces just those videos' records.
     async putVideos({ items }) {
       const byChunk = new Map();
       for (const it of items || []) {
