@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YCFP Library Bridge
 // @namespace    ycfp
-// @version      1.0.1
+// @version      1.1.0
 // @description  Companion for the YouTube Channel Playlist Collector: reads and writes the Music Library database (Firestore) for it. Picks up your sign-in from the Music Library website, so ratings you set on YouTube show up there in real time.
 // @match        https://www.youtube.com/*
 // @match        https://proj-yeet.github.io/yt-music-library/*
@@ -33,7 +33,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.0.1';
+  const VERSION = '1.1.0';
   const API_KEY = 'AIzaSyABlyOUW567MA3tGLzuHnQFYvDRXBUkVn0';
   const PROJECT = 'yt-music-library-794e4';
   const DOCS = `projects/${PROJECT}/databases/(default)/documents`;
@@ -235,6 +235,24 @@
       for (const k of keys) f[k] = toValue(fields[k]);
       await commit([{ update: { name: docName('meta'), fields: f }, updateMask: { fieldPaths: keys.map(seg) } }]);
       return { written: keys.length };
+    },
+
+    // Visitors' "this video looks dead" reports (owner only): [{ id, why, at }].
+    async getReports() {
+      const t = await token();
+      const res = await http('GET', `${BASE}/reports?pageSize=300`, null, t);
+      return ((res && res.documents) || []).map((d) => {
+        const f = fromFields(d.fields);
+        return { id: d.name.split('/').pop(), why: f.why || '', at: f.at || '' };
+      });
+    },
+
+    // Clear handled reports.
+    async clearReports({ ids }) {
+      const ok = (ids || []).filter((id) => /^[\w-]{11}$/.test(id));
+      if (!ok.length) return { cleared: 0 };
+      await commit(ok.map((id) => ({ delete: `${DOCS}/reports/${id}` })));
+      return { cleared: ok.length };
     },
 
     // Import: replace every chunk document.

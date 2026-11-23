@@ -194,3 +194,21 @@ test('dead songs are not moved by the sync, and rating one again revives it', as
   assert.equal(h.rec('fffffffffff').z, undefined);
   assert.equal(h.rec('fffffffffff').p, 'PL_BEST');
 });
+
+test('visitor reports are checked from here before anything is removed', async () => {
+  const h = deadHarness({ aaaaaaaaaa1: { status: 'ERROR', reason: 'Video unavailable' } });
+  const cleared = [];
+  h.ctx.__reports = [{ id: 'aaaaaaaaaa1', why: 'thumb' }, { id: 'aaaaaaaaaa5', why: 'e150' }, { id: 'zzzzzzzzzzz', why: 'thumb' }];
+  h.ctx.__cleared = cleared;
+  h.run(`{ const inner = libBridge; libBridge = async (op, args) => {
+    if (op === 'getReports') return __reports;
+    if (op === 'clearReports') { __cleared.push(...args.ids); return {}; }
+    return inner(op, args);
+  }; }`);
+  const dead = await h.run('libHandleReports()');
+  assert.equal(dead.length, 1);
+  assert.equal(h.rec('aaaaaaaaaa1').z.why, 'Video unavailable');
+  assert.equal(h.rec('aaaaaaaaaa5').z, undefined);
+  assert.deepEqual(h.calls.filter((c) => c[0] === 'remove').map((c) => c[2]), ['aaaaaaaaaa1']);
+  assert.deepEqual([...cleared].sort(), ['aaaaaaaaaa1', 'aaaaaaaaaa5', 'zzzzzzzzzzz']);
+});

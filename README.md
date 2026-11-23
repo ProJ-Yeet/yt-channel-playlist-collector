@@ -59,7 +59,8 @@ song:
 - Ratings changed on the website get carried out the next time YouTube is open.
 - Dead songs (deleted, private, blocked in your country) are found while YouTube is open, checked
   twice, taken out of their playlist and kept on the website's **Dead videos** list with the date,
-  reason and playlist, so they can be replaced later.
+  reason and playlist, so they can be replaced later. Visitors of the website help too: a video
+  that looks dead in their browser is reported, and checked from your side before anything happens.
 
 **Collecting**
 

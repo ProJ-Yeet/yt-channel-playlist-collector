@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Channel Playlist Collector
 // @namespace    ycfp
-// @version      3.60.0
+// @version      3.61.0
 // @description  Adds a "Collect All" button on YouTube channels: gathers every upload + the "- Topic" channel's releases, skips videos already in your configured playlists, dedupes by title+duration, and adds the rest into an EXISTING playlist of your choice (or a new one). Also lets you copy any playlist into another.
 // @match        https://www.youtube.com/*
 // @match        https://*.youtube.com/*
@@ -1538,6 +1538,39 @@
     return dead;
   }
 
+  // Reports filed by visitors of the website (a blank thumbnail, or the
+  // player refused the video). Each is checked from here — a video blocked
+  // only in a friend's country is not dead for you — then cleared.
+  async function libHandleReports(log = () => {}) {
+    let reports;
+    try { reports = await libBridge('getReports', {}, 30000); } catch (e) { return []; } // older bridge
+    if (!reports || !reports.length) return [];
+    await libLoad();
+    const dead = [];
+    const handled = [];
+    for (const r of reports.slice(0, 50)) {
+      const rec = lib.videos.get(r.id);
+      if (rec && !rec.z && rec.p) {
+        const why = await libDeadReason(r.id);
+        if (why) {
+          try { await libRemoveMany(rec.p, [r.id], null, 'dead'); } catch (e) {
+            log(`⚠ Could not take "${rec.t || r.id}" out of ${libPlaylistName(rec.p)} (${e.message || e}); will try again.`);
+            continue;
+          }
+          dead.push({ id: r.id, why, pl: rec.p });
+          log(`🪦 Reported by a visitor and confirmed: "${rec.t || r.id}" — ${why}.`);
+        } else {
+          log(`Reported by a visitor but plays here: "${rec.t || r.id}" — left alone.`);
+        }
+        await sleep(400);
+      }
+      handled.push(r.id);
+    }
+    if (dead.length) await libMarkDead(dead);
+    if (handled.length) await libBridge('clearReports', { ids: handled });
+    return dead;
+  }
+
   // Other tools (⊘ Unavailable, 🪦 cleanup) removed dead entries: record
   // the library songs among them that were taken out of their own playlist.
   function libNoteRemovedDead(entries) {
@@ -1656,7 +1689,7 @@
       if (!ping.signedIn) return;
       const n = await libSyncPending(() => {}, null, 300);
       if (n) libToast(`🗂 Music library: moved ${n} song${n === 1 ? '' : 's'} into their rating's playlist.`);
-      const dead = await libHealthTick();
+      const dead = [...await libHandleReports(), ...await libHealthTick()];
       if (dead.length) {
         const names = dead.slice(0, 3).map((d) => `"${(lib.videos.get(d.id) || {}).t || d.id}"`).join(', ');
         libToast(`🪦 Music library: ${dead.length} song${dead.length === 1 ? '' : 's'} died (${names}${dead.length > 3 ? ', …' : ''}). `
@@ -1794,6 +1827,8 @@
       let total = 0;
       try {
         const seen = (() => { try { return JSON.parse(localStorage.getItem(LIB_HEALTH_KEY) || '{}') || {}; } catch (e) { return {}; } })();
+        ui.log('Checking reports from website visitors…');
+        total += (await libHandleReports(ui.log)).length;
         for (const pl of Object.values(lib.meta.buckets || {}).flat()) {
           ui.guard();
           ui.log(`Checking ${pl.name}…`);
