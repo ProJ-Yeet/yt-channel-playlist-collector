@@ -45,7 +45,7 @@ keys or quotas.
 
 **Rating strip.** Every video gets a small strip. The category letters are on top (S Song,
 M Music, R Relax, Sl Slow, E Electric, C Classical, P Pop, Ro Rock, Ep Epic, Mc Minecraft,
-H Hololive), and the stars, **L** (Long) and **2nd** (Secondary) are below. One click files the
+H Hololive, which takes any VTuber), and the stars, **L** (Long) and **2nd** (Secondary) are below. One click files the
 song:
 
 - It goes into the playlist for that combination, such as "4★ Song" or "3★ Relax · Long", and
@@ -83,7 +83,7 @@ bookmarks, 🔤 sort folders).
 
 🗂 Library shows how many songs are in the library and how many are waiting to move. It also
 imports your existing playlists: you map each one to a rating, and where a song is in several
-playlists the highest rating wins. It recognises Hololive songs by channel, and you can untick
+playlists the highest rating wins. It recognises VTuber songs (Hololive or any other) by channel and name, and you can untick
 any channel before saving. 🧹 Tidy then removes the duplicate copies. Each removal is logged in
 📜 History, so it can be undone.
 

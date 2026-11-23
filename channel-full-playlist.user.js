@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Channel Playlist Collector
 // @namespace    ycfp
-// @version      3.59.0
+// @version      3.59.1
 // @description  Adds a "Collect All" button on YouTube channels: gathers every upload + the "- Topic" channel's releases, skips videos already in your configured playlists, dedupes by title+duration, and adds the rest into an EXISTING playlist of your choice (or a new one). Also lets you copy any playlist into another.
 // @match        https://www.youtube.com/*
 // @match        https://*.youtube.com/*
@@ -1263,9 +1263,17 @@
     ['Secondary', 3, 'song', 'S'], ['Songs Long', 3, 'song', 'L'], ['Relaxing Long', 3, 'relax', 'L'],
     ['Soft songs', 2, 'song', ''], ['Electric', 2, 'electric', ''],
   ];
-  // Read only to recognise Hololive songs (not imported themselves).
+  // The "Hololive" category holds any VTuber's songs and covers, not only
+  // Hololive. These playlists are read only to recognise them (not imported).
   const LIB_HOLO_LISTS = ['Hololive Songs 2025 10 11', 'ホロライブ歌ってみた / Hololive Songs&Covers', 'Hololive', 'HoroRaibu'];
-  const LIB_HOLO_RE = /hololive|ホロライブ|holoX|ホロックス|ReGLOSS|FLOW GLOW|holostars/i;
+  const LIB_HOLO_RE = new RegExp([
+    'v-?tuber', 'ブイチューバー', 'バーチャルyoutuber', 'virtual youtuber', 'virtual singer', 'バーチャルシンガー',
+    'hololive', 'ホロライブ', 'holoX', 'ホロックス', 'ReGLOSS', 'FLOW GLOW', 'holostars', 'ホロスターズ',
+    'nijisanji', 'にじさんじ', 'VSPO', 'ぶいすぽ', 'vshojo', 'phase connect', 'idol corp', 'neo-?porte',
+    'ななしいんく', '774 ?inc', 'Re:AcT', 'のりプロ', 'noripro', 'prism project',
+    'kizuna ?ai', 'キズナアイ', 'しぐれうい', 'shigure ui', 'ironmouse', 'neuro-?sama', 'pikamee', '\\bkson\\b',
+    '花譜', '理芽', 'ヰ世界情緒', 'isekaijoucho', 'KMNZ', '星街すいせい', '宝鐘マリン', 'ぺこら',
+  ].join('|'), 'i');
 
   function libChunkOf(id) {
     let h = 0;
@@ -1678,8 +1686,8 @@
       });
       log(`${e.title}: ${vids.length} videos → ${libBucketName(e.key)}`);
     }
-    // Hololive: songs in your Hololive playlists, plus channels that appear
-    // there at least twice, plus Hololive names in the channel or title.
+    // Hololive (any VTuber): songs in your Hololive playlists, plus channels
+    // that appear there at least twice, plus VTuber names in the channel or title.
     const holoIds = new Set();
     const holoChCount = new Map();
     for (const t of LIB_HOLO_LISTS) {
@@ -1741,7 +1749,7 @@
     ui.body.append(
       el('h3', {}, 'Import review'),
       el('div', {}, `${recs.size.toLocaleString()} songs (${occ.size.toLocaleString()} from these playlists${kept.length ? `, ${kept.length} already rated elsewhere` : ''}). ${dupes.toLocaleString()} are in more than one playlist: the highest rating wins.`),
-      el('div', {}, `Hololive: ${holoTotal.toLocaleString()} songs from ${holoByChannel.size} channels get the Hololive category (keeping their stars). Untick a channel that is not Hololive:`),
+      el('div', {}, `Hololive / VTuber: ${holoTotal.toLocaleString()} songs from ${holoByChannel.size} channels get the Hololive category (keeping their stars). Untick a channel that is not a VTuber:`),
       holoList,
       el('div', {}, 'Songs already in the library keep their current rating. Nothing on YouTube changes until the next step.'),
       el('div', { class: 'ycfp-row' }, saveBtn),

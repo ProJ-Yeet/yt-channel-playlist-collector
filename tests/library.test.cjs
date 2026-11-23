@@ -55,6 +55,13 @@ function harness({ videos = {}, buckets = {}, failAddTo = null } = {}) {
   return { ctx, calls, db, rec, run: (code) => vm.runInContext(code, ctx) };
 }
 
+test('the Hololive category recognises VTubers in general', () => {
+  const h = harness();
+  const is = (s) => h.run(`LIB_HOLO_RE.test(${JSON.stringify(s)})`);
+  for (const s of ['Mori Calliope Ch. hololive-EN', 'しぐれうい', 'にじさんじ', 'Ironmouse', 'VSPO! 【ぶいすぽっ！】', 'indie VTuber cover', '花譜']) assert.ok(is(s), s);
+  for (const s of ['Michael Jackson', 'Karaoke Ch.', 'Victor Entertainment', 'THE FIRST TAKE', 'Kanaria']) assert.ok(!is(s), s);
+});
+
 const SONGS = { '4-song': [{ id: 'PL_S1', name: 'Songs', n: 5000 }, { id: 'PL_S3', name: 'Songs 3', n: 104 }] };
 
 test('bucket names and next playlist names', () => {

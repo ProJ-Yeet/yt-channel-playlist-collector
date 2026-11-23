@@ -2,6 +2,10 @@
 
 Version-by-version notes for the YouTube Channel Playlist Collector. The overview is in [README.md](README.md).
 
+## v3.59.1
+
+The Hololive category now means any VTuber's songs and covers (Nijisanji, VSPO, VShojo, Phase Connect, indies, ...), and the import recognises them by name.
+
 ## v3.59.0
 
 Music library: rating strip (category letters + stars + Long / 2nd flairs) on every video, songs filed into one playlist per stars/category/flair combination with automatic roll-over at 5,000, ratings changed on the website moved on YouTube (auto every 9+ min or from 🗂 Library), playlist import with Hololive detection and duplicate tidy-up. New companion userscript `ytml-bridge.user.js`.
