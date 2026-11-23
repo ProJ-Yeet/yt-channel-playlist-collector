@@ -42,6 +42,7 @@ function harness({ videos = {}, buckets = {}, failAddTo = null } = {}) {
   ctx.__db = db;
   vm.runInContext(`libBridge = async (op, args) => {
     const db = __db;
+    if (op === 'ping') return { signedIn: true };
     if (op === 'getAll') return JSON.parse(JSON.stringify(db));
     if (op === 'setMeta') { Object.assign(db.meta, JSON.parse(JSON.stringify(args.fields))); return {}; }
     if (op === 'putVideos') { for (const it of args.items) db.chunks[Number(it.chunk.slice(1))][it.id] = JSON.parse(JSON.stringify(it.rec)); return {}; }
