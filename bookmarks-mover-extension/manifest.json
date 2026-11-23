@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "YCFP Bookmarks Mover",
+  "version": "1.4.0",
+  "description": "Lets the YouTube Channel Playlist Collector userscript list, add, move and delete bookmarks in a folder — used by its batch channel-pull, bookmark-dedupe and playlist-channel bookmarking features. Only talks to youtube.com tabs, via window.postMessage.",
+  "permissions": ["bookmarks"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://*.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

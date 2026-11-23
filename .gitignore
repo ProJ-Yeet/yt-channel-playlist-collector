@@ -1,0 +1,6 @@
+﻿# personal working files
+replacements-*.txt
+# loader stubs point at a local path
+loaders/
+node_modules/
+
