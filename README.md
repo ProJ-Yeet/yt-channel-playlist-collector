@@ -48,6 +48,9 @@ M Music, R Relax, Sl Slow, E Electric, C Classical, P Pop, Ro Rock, Ep Epic, Mc 
 H Hololive, which takes any VTuber), and the stars, **L** (Long) and **2nd** (Secondary) are below. One click files the
 song:
 
+![Rating strip under a video: category letters on top, stars and flairs below](docs/rating-strip.png)
+
+
 - It goes into the playlist for that combination, such as "4★ Song" or "3★ Relax · Long", and
   leaves the playlist you're in.
 - Each combination's playlist is made when its first song arrives. When it reaches YouTube's
