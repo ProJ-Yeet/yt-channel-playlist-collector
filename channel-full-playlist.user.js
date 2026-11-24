@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Channel Playlist Collector
 // @namespace    ycfp
-// @version      3.61.0
+// @version      3.62.0
 // @description  Adds a "Collect All" button on YouTube channels: gathers every upload + the "- Topic" channel's releases, skips videos already in your configured playlists, dedupes by title+duration, and adds the rest into an EXISTING playlist of your choice (or a new one). Also lets you copy any playlist into another.
 // @match        https://www.youtube.com/*
 // @match        https://*.youtube.com/*
@@ -1256,7 +1256,7 @@
   const LIB_CHUNKS = 32;
   const LIB_LONG_SEC = 15 * 60;
   const LIB_CATS = [
-    ['song', 'Song', 'S'], ['music', 'Music', 'M'], ['relax', 'Relax', 'R'], ['slow', 'Slow', 'Sl'],
+    ['song', 'Song', 'S'], ['music', 'Music', 'M'], ['relax', 'Relax', 'R'], ['lofi', 'Lofi', 'Lo'], ['slow', 'Slow', 'Sl'],
     ['electric', 'Electric', 'E'], ['classical', 'Classical', 'C'], ['pop', 'Pop', 'P'], ['rock', 'Rock', 'Ro'],
     ['epic', 'Epic', 'Ep'], ['minecraft', 'Minecraft', 'Mc'], ['hololive', 'Hololive', 'H'],
   ];
@@ -5085,6 +5085,7 @@
     .ycfp-rate .ycfp-rate-cat[data-c="song"] { --ycfp-c: #d63a6f; }
     .ycfp-rate .ycfp-rate-cat[data-c="music"] { --ycfp-c: #3a7bd6; }
     .ycfp-rate .ycfp-rate-cat[data-c="relax"] { --ycfp-c: #2f9e86; }
+    .ycfp-rate .ycfp-rate-cat[data-c="lofi"] { --ycfp-c: #6b7fa8; }
     .ycfp-rate .ycfp-rate-cat[data-c="slow"] { --ycfp-c: #8a62d6; }
     .ycfp-rate .ycfp-rate-cat[data-c="electric"] { --ycfp-c: #0ea5c6; }
     .ycfp-rate .ycfp-rate-cat[data-c="classical"] { --ycfp-c: #a07a2c; }
